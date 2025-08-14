@@ -93,12 +93,12 @@ class MenuScene(Scene):
 class GameScene(Scene):
     def __init__(self, go_to_menu):
         self.go_to_menu = go_to_menu
-        self.info = Label("게임 화면 (스페이스: 일시정지/메뉴)", center=(WIDTH//2, 40), font=FONT_M)
+        self.info = Label("", center=(WIDTH//2, 40), font=FONT_M)
         # 예시: 간단한 셔틀콕 표시용
         self.shuttle_pos = [WIDTH//2, HEIGHT//2]
         self.vel = [200, 120]  # px/s
         self.radius = 10
-
+    
     def update(self, dt):
         # 셔틀콕 데모 이동
         self.shuttle_pos[0] += self.vel[0] * dt
@@ -112,11 +112,65 @@ class GameScene(Scene):
     def draw(self, surf):
         surf.fill((245, 250, 255))
         self.info.draw(surf)
-        # 코트 느낌 라인
-        pygame.draw.rect(surf, (180,220,255), pygame.Rect(80,80, WIDTH-160, HEIGHT-160), width=6, border_radius=18)
-        pygame.draw.line(surf, (150,180,255), (WIDTH//2, 80), (WIDTH//2, HEIGHT-80), width=4)  # 중앙선(네트 느낌)
-        # 셔틀콕(데모)
+
+        # ===== 스타일 통일 =====
+        MAIN_LINE_COLOR = (0, 0, 0)  # 바깥 코트 테두리 & 가로 중앙선
+        MAIN_LINE_W     = 6
+
+        SUB_LINE_COLOR  = (128, 128, 128)  # 보조선(위/아래 x/4 두 줄 + 세로 중앙선)
+        SUB_LINE_W      = 3
+
+        # ===== 코트 크기/위치 =====
+        COURT_H = 780
+        COURT_W = int(COURT_H / 1.5)  # 현재 네가 둔 비율 유지
+        court_x = (WIDTH  - COURT_W) // 2
+        court_y = (HEIGHT - COURT_H) // 2
+        court_rect = pygame.Rect(court_x, court_y, COURT_W, COURT_H)
+
+        # 바깥 코트 테두리
+        pygame.draw.rect(surf, MAIN_LINE_COLOR, court_rect, width=MAIN_LINE_W, border_radius=18)
+
+        # ===== 중앙선(가로) - 코트 세로 중앙 y =====
+        cy = court_rect.centery
+        pygame.draw.line(
+            surf, MAIN_LINE_COLOR,
+            (court_rect.left,  cy),
+            (court_rect.right, cy),
+            width=MAIN_LINE_W
+        )
+
+        # ===== 아래 코트(x = 중앙선~아래 테두리 거리)에서 x/4 지점 두 줄 =====
+        bottom_y = court_rect.bottom
+        x_bottom = bottom_y - cy
+
+        y_down_from_center = int(cy + x_bottom / 4)      # 중앙선에서 x/4만큼 ↓
+        y_up_from_bottom   = int(bottom_y - x_bottom / 4) # 아래 테두리에서 x/4만큼 ↑
+
+        pygame.draw.line(surf, SUB_LINE_COLOR, (court_rect.left,  y_down_from_center), (court_rect.right, y_down_from_center), width=SUB_LINE_W)
+        pygame.draw.line(surf, SUB_LINE_COLOR, (court_rect.left,  y_up_from_bottom),   (court_rect.right, y_up_from_bottom),   width=SUB_LINE_W)
+
+        # ===== 위 코트(x = 중앙선~위 테두리 거리)에서 x/4 지점 두 줄 =====
+        top_y = court_rect.top
+        x_top = cy - top_y
+
+        y_up_from_center = int(cy - x_top / 4)        # 중앙선에서 x/4만큼 ↑
+        y_down_from_top  = int(top_y + x_top / 4)     # 위 테두리에서 x/4만큼 ↓
+
+        pygame.draw.line(surf, SUB_LINE_COLOR, (court_rect.left,  y_up_from_center), (court_rect.right, y_up_from_center), width=SUB_LINE_W)
+        pygame.draw.line(surf, SUB_LINE_COLOR, (court_rect.left,  y_down_from_top),  (court_rect.right, y_down_from_top),  width=SUB_LINE_W)
+
+        # ===== 세로 중앙선 =====
+        center_x = court_rect.centerx
+        pygame.draw.line(
+            surf, SUB_LINE_COLOR,
+            (center_x, court_rect.top),
+            (center_x, court_rect.bottom),
+            width=SUB_LINE_W
+        )
+
+        # 셔틀(데모)
         pygame.draw.circle(surf, (30,144,255), (int(self.shuttle_pos[0]), int(self.shuttle_pos[1])), self.radius)
+
 
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
