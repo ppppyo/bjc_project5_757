@@ -16,6 +16,7 @@ PRIMARY = (30, 144, 255)
 
 FONT_L = pygame.font.SysFont("malgungothic", 48)  # 한글 폰트(윈도우 기준)
 FONT_M = pygame.font.SysFont("malgungothic", 28)
+FONT_S = pygame.font.SysFont("malgungothic", 22)
 
 # ---------- UI 위젯 ----------
 class Button:
@@ -67,19 +68,23 @@ class Scene:
 class MenuScene(Scene):
     def __init__(self, go_to_game):
         self.title = Label("TEAM BJC - Badminton Junkies Crew", center=(WIDTH//2, 120))
-        self.start_btn = Button("게임 시작", center=(WIDTH//2, 260))
-        self.quit_btn  = Button("종료", center=(WIDTH//2, 340))
+        self.start_btn = Button("게임 시작", center=(WIDTH//2, 300))
+        self.howto_btn = Button("조작법", center=(WIDTH//2, 380))
+        self.quit_btn  = Button("종료", center=(WIDTH//2, 460))
         self.go_to_game = go_to_game
+        self.go_to_howto = go_to_howto
 
     def update(self, dt):
         mouse_pos = pygame.mouse.get_pos()
         self.start_btn.update(mouse_pos)
+        self.howto_btn.update(mouse_pos)
         self.quit_btn.update(mouse_pos)
 
     def draw(self, surf):
         surf.fill(WHITE)
         self.title.draw(surf)
         self.start_btn.draw(surf)
+        self.howto_btn.draw(surf)
         self.quit_btn.draw(surf)
 
         # 하단 크레딧
@@ -88,7 +93,57 @@ class MenuScene(Scene):
 
     def handle_event(self, event):
         self.start_btn.handle_event(event, self.go_to_game)
+        self.howto_btn.handle_event(event, self.go_to_howto)
         self.quit_btn.handle_event(event, lambda: sys.exit(0))
+
+class HowToScene(Scene):
+    """조작법/규칙 안내 씬"""
+    def __init__(self, go_back_menu):
+        self.go_back_menu = go_back_menu
+        self.title = Label("조작법 안내", center=(WIDTH//2, 90))
+        self.back_btn = Button("뒤로", center=(WIDTH//2, HEIGHT-80), size=(160, 56))
+
+        # 안내 텍스트 (원하는 대로 수정 가능)
+        self.lines = [
+            "방향키 ←/→/↑/↓ : 좌/우/앞/뒤 플레이어 이동",
+            "Enter         : 스매시 (리시브의 1.5~2배 속도)",
+            "Space         : 리시브",
+            "",
+            "서브 규칙:",
+            "- 득점자가 다음 서브를 함",
+            "- 자신의 점수 홀수 = 왼쪽, 짝수 = 오른쪽에서 서브",
+            "- 서브는 자기 코트에서 대각 서비스 박스로"
+        ]
+        # 미리 렌더
+        self.text_surfs = [FONT_S.render(t, True, (40,40,40)) for t in self.lines]
+
+    def update(self, dt):
+        self.back_btn.update(pygame.mouse.get_pos())
+
+    def draw(self, surf):
+        surf.fill((248, 250, 253))
+        self.title.draw(surf)
+
+        # 텍스트 블록 표시
+        x = WIDTH//2 - 280
+        y = 160
+        box_w = 560
+        line_h = 34
+
+        # 배경 상자
+        box_rect = pygame.Rect(x-20, y-20, box_w+40, line_h*len(self.text_surfs)+40)
+        pygame.draw.rect(surf, (235,240,248), box_rect, border_radius=16)
+        pygame.draw.rect(surf, (0,0,0), box_rect, width=2, border_radius=16)
+
+        for i, ts in enumerate(self.text_surfs):
+            surf.blit(ts, (x, y + i*line_h))
+
+        self.back_btn.draw(surf)
+
+    def handle_event(self, event):
+        self.back_btn.handle_event(event, self.go_back_menu)
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self.go_back_menu()
 
 class GameScene(Scene):
     def __init__(self, go_to_menu):
@@ -181,9 +236,11 @@ def main():
     # 씬 전환 콜백 정의
     current_scene = {"scene": None}
     def go_to_menu():
-        current_scene["scene"] = MenuScene(go_to_game)
+        current_scene["scene"] = MenuScene(go_to_game, go_to_howto)
     def go_to_game():
         current_scene["scene"] = GameScene(go_to_menu)
+    def go_to_howto():
+        current_scene["scene"] = HowToScene(go_to_menu)
 
     go_to_menu()  # 시작은 메뉴
 
