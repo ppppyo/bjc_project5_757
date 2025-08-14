@@ -2,7 +2,7 @@ import pygame
 import sys
 
 pygame.init()
-WIDTH, HEIGHT = 960, 540
+WIDTH, HEIGHT = 800, 900
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("BJC - Badminton Junkies Crew")
 clock = pygame.time.Clock()
