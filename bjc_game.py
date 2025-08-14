@@ -7,6 +7,7 @@ import random
 # 1. 기본 설정 & 전역 상수
 # =========================================================
 
+pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=256)
 pygame.init()
 WIDTH, HEIGHT = 800, 900
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -336,6 +337,26 @@ class GameScene(Scene):
         self.info = Label("", center=(WIDTH//2, 40), font=FONT_M)
         self.last_hitter = None  # 마지막으로 친 쪽("top"/"bottom"), 연속 타격 방지/제어 용
 
+        # 셔틀 상태(데모)
+        self.shuttle_pos = [WIDTH//2, HEIGHT//2]
+        self.vel = [200, 120]
+        self.radius = 10
+
+         # --- 사운드 로드 ---
+        try:
+            # 업로드한 파일 경로에 맞춰주세요.
+            self.snd_receive = pygame.mixer.Sound("C:/Users/basra/OneDrive/바탕 화면/Gist/BJC/Python Programbadminton-83559.mp3")          # 리시브
+            self.snd_smash   = pygame.mixer.Sound("C:/Users/basra/OneDrive/바탕 화면/Gist/BJC/Python Program/table-smash-47690.mp3")        # 스매시
+            self.snd_lose    = pygame.mixer.Sound("C:/Users/basra/OneDrive/바탕 화면/Gist/BJC/Python Program/cartoon-fail-trumpet-278822.mp3")  # 패배
+        except Exception as e:
+            print("[sound] load error:", e)
+            self.snd_receive = self.snd_smash = self.snd_lose = None
+
+        # 볼륨 튜닝(원하면 조정)
+        if self.snd_receive: self.snd_receive.set_volume(0.75)
+        if self.snd_smash:   self.snd_smash.set_volume(0.85)
+        if self.snd_lose:    self.snd_lose.set_volume(0.8)
+
         # ===== 코트 기하 =====
         self.COURT_H = 780
         self.COURT_W = int(self.COURT_H / 1.5)
@@ -367,6 +388,16 @@ class GameScene(Scene):
 
         self.reset_serve(keep_server=True)
 
+    # --- 재생 헬퍼 ---
+    def play_receive(self):
+        if self.snd_receive: self.snd_receive.play()
+
+    def play_smash(self):
+        if self.snd_smash: self.snd_smash.play()
+
+    def play_lose(self):
+        if self.snd_lose: self.snd_lose.play()
+
     # ------------ 유틸 ------------
     def place_for_serve(self):
         # 서버 옆에서 살짝 뒤쪽 위치에 셔틀 배치
@@ -381,7 +412,7 @@ class GameScene(Scene):
         self.place_for_serve()
         if ENABLE_TIME_LIMIT and ROUND_TIME>0:
             self.round_time_left = float(ROUND_TIME)
-        self.info.set_text(f"서브 : {self.server.upper()} - Space로 시작")
+        self.info.set_text(f"서브 대기: {self.server.upper()} - Space로 시작")
 
     def start_rally(self):
         self.rally_active = True
@@ -394,10 +425,8 @@ class GameScene(Scene):
         return "top" if y < self.cy else "bottom"
 
     def award_point(self, winner, reason):
+        self.play_lose()
         self.score[winner] += 1
-        # --- 점수 애니메이션 시작 ---
-        self.last_scored   = winner
-        self.score_flash_t = SCORE_FLASH_DURATION
         self.server = winner
         if self.is_game_over():
             w = "TOP" if self.score["top"] > self.score["bottom"] else "BOTTOM"
@@ -465,6 +494,11 @@ class GameScene(Scene):
         player.last_hit_time = now
         self.last_hitter = player.side
 
+        if player.is_human and player.swing_pressed:
+          self.play_smash()     # 스매시
+        else:
+          self.play_receive()   # 일반 리시브
+
     def update(self, dt):
         now = pygame.time.get_ticks() / 1000.0
         self.time_elapsed += dt
@@ -483,14 +517,14 @@ class GameScene(Scene):
             self.round_time_left -= dt
             if self.round_time_left <= 0:
                 # 시간 초과: 상대 득점
-                loser = self.side_of(self.shuttle_pos[1])  # 셔틀이 있는 쪽이 실격
+                loser = self.side_of_y(self.shuttle_pos[1])  # 셔틀이 있는 쪽이 실격
                 winner = "bottom" if loser == "top" else "top"
                 self.award_point(winner, "Time over")
                 return
         # 플레이어 입력/AI
         self.player_bottom.swing_pressed = keys[pygame.K_SPACE]
         self.player_bottom.update(dt, self.shuttle)
-        self.player_top.update(dt, self.shuttle, self.diff)
+        self.player_top.update(dt, self.shuttle)
 
         # 셔틀 이동
         self.shuttle.update(dt)
@@ -510,10 +544,6 @@ class GameScene(Scene):
             winner_side = "bottom" if loser_side == "top" else "top"
             self.award_point(winner_side, f"Out - {loser_side.upper()}")
             return
-        # 점수 깜빡이 타이머 감소
-        if self.score_flash_t > 0:
-            self.score_flash_t = max(0.0, self.score_flash_t - dt)
-
 
     def draw(self, surf):
         surf.fill((245, 250, 255))
@@ -557,7 +587,7 @@ class GameScene(Scene):
         self.player_bottom.draw(surf)
         self.shuttle.draw(surf)
 
-        # 스코어/상태 보드
+         # 스코어/상태 보드
         BOARD_W, BOARD_H = 120, 60
         margin_court = 10
 
@@ -607,6 +637,7 @@ class GameScene(Scene):
             (board_rect.centerx - text_surface.get_width() // 2,
             board_rect.centery - text_surface.get_height() // 2)
         )
+
         # 하단 도움말
         help1 = FONT_S.render("←/→/↑/↓: 속도조절  |  Space: 서브  |  R: 랠리 리셋  |  ESC: 메뉴", True, (80,80,80))
         surf.blit(help1, (WIDTH//2 - help1.get_width()//2, HEIGHT - 36))
@@ -621,6 +652,7 @@ class GameScene(Scene):
                 self.diff_mode = "easy" if event.key == pygame.K_F1 else ("normal" if event.key == pygame.K_F2 else "hard")
                 self.diff = DIFFICULTY[self.diff_mode]
                 self.info.set_text(f"난이도 변경: {self.diff_mode.upper()}")
+
 
 # =========================================================
 # 5.5 GameOverScene
