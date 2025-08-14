@@ -1,5 +1,8 @@
 import pygame
 import sys
+from pygame import transform as pg_transform
+import math
+import random
 # =========================================================
 # 1. 기본 설정 & 전역 상수
 # =========================================================
@@ -44,6 +47,16 @@ POWER_HIT_BONUS = 180.0    # 파워 스윙 보너스 속도(Space)
 MIN_VY_AFTER_HIT = 320.0   # 타격 후 최소 수직 속도(상대편으로 확실히 넘어가도록)
 CROSS_NUDGE_PX   = 14.0    # 타격 후 새 속도 방향으로 살짝 밀어내는 거리(겹침 방지)
 
+# 점수 애니메이션
+SCORE_FLASH_DURATION = 0.45   # 깜빡임 총 시간(초)
+SCORE_MAX_SCALE      = 1.25   # 글자 최대 확대 배율
+SCORE_FLASH_COLOR    = (30, 144, 255)  # 하이라이트 색
+
+DIFFICULTY = {
+    "easy":   {"speed_scale": 0.6, "aim_error": 50, "predict": 0.10, "swing_prob": 0.55},
+    "normal": {"speed_scale": 0.9, "aim_error": 20, "predict": 0.40, "swing_prob": 0.85},
+    "hard":   {"speed_scale": 1.2, "aim_error":  5, "predict": 0.80, "swing_prob": 1.00},
+}
 
 # =========================================================
 # 2. UI 위젯 클래스 (버튼, 라벨 등)
@@ -132,24 +145,45 @@ class Player:
         self.pos[0] = max(rect.left, min(rect.right, self.pos[0]))
         self.pos[1] = max(rect.top,  min(rect.bottom, self.pos[1]))
 
-    def update_ai(self, dt, shuttle):
-        # 간단한 추적 AI: 셔틀 x로 보정, y는 하프 내 유지
-        target_x = shuttle.pos[0]
-        ax = 0.0
-        if abs(target_x - self.pos[0]) > 4:
-            ax = PLAYER_SPEED * (1 if target_x > self.pos[0] else -1)
-        self.pos[0] += ax * dt * 0.75  # 반응 속도 낮춰서 자연스럽게
+    def update_ai(self, dt, shuttle, diff=None):
+        # 목표 x: 현재 x (가중) + 예측 x (가중)
+        # 예측 시간: 셔틀이 내 y까지 도달하는 대략 시간
+        vy = shuttle.vel[1]
+        dy = abs(self.pos[1] - shuttle.pos[1])
+        t_to_me = dy / max(60.0, abs(vy))   # 60은 안전 최소치로 폭주 방지
+
+        predicted_x = shuttle.pos[0] + shuttle.vel[0] * t_to_me
+        predict_w   = max(0.0, min(1.0, diff["predict"]))
+
+        target_x = (1.0 - predict_w) * shuttle.pos[0] + predict_w * predicted_x
+        # 에임 오차
+        target_x += random.uniform(-diff["aim_error"], diff["aim_error"])
+
+        # 이동 속도
+        ai_speed = PLAYER_SPEED * diff["speed_scale"]
+        if abs(target_x - self.pos[0]) > 2:
+            step = ai_speed * dt
+            if target_x > self.pos[0]:
+                self.pos[0] += min(step, target_x - self.pos[0])
+            else:
+                self.pos[0] -= min(step, self.pos[0] - target_x)
+
+        # 범위 클램프
         rect = self.allowed_rect()
         self.pos[0] = max(rect.left, min(rect.right, self.pos[0]))
         self.pos[1] = max(rect.top,  min(rect.bottom, self.pos[1]))
-        # 자동 스윙: 셔틀이 내 하프로 접근/체공 시 타격 시도
-        self.swing_pressed = True
 
-    def update(self, dt, shuttle):
+        # 스윙 확률: 셔틀이 근처일 때만 시도
+        close_x = abs(shuttle.pos[0] - self.pos[0]) <= (RACKET_RADIUS + 20)
+        close_y = abs(shuttle.pos[1] - self.pos[1]) <= 120
+        self.swing_pressed = (close_x and close_y and (random.random() < diff["swing_prob"]))
+
+
+    def update(self, dt, shuttle, diff=None):
         if self.is_human:
             self.update_human(dt)
         else:
-            self.update_ai(dt, shuttle)
+            self.update_ai(dt, shuttle, diff if diff else DIFFICULTY["normal"])
 
     def can_hit(self, now, shuttle):
         # 쿨다운 + 같은 하프에 있을 때 + 셔틀 가까이
@@ -323,6 +357,14 @@ class GameScene(Scene):
         self.round_time_left = float(ROUND_TIME) if (ENABLE_TIME_LIMIT and ROUND_TIME>0) else None
         self.time_elapsed = 0.0
 
+        self.score_flash_t  = 0.0      # 남은 깜빡이 시간
+        self.last_scored    = None     # 'top' or 'bottom' (누가 득점했는지)
+
+        # ==== 난이도 ====
+        self.diff_mode = "normal"          # "easy" / "normal" / "hard"
+        self.diff      = DIFFICULTY[self.diff_mode]
+        self.info.set_text(f"난이도: {self.diff_mode.upper()}  |  Space 서브")
+
         self.reset_serve(keep_server=True)
 
     # ------------ 유틸 ------------
@@ -339,7 +381,7 @@ class GameScene(Scene):
         self.place_for_serve()
         if ENABLE_TIME_LIMIT and ROUND_TIME>0:
             self.round_time_left = float(ROUND_TIME)
-        self.info.set_text(f"서브 대기: {self.server.upper()} - Space로 시작")
+        self.info.set_text(f"서브 : {self.server.upper()} - Space로 시작")
 
     def start_rally(self):
         self.rally_active = True
@@ -353,6 +395,9 @@ class GameScene(Scene):
 
     def award_point(self, winner, reason):
         self.score[winner] += 1
+        # --- 점수 애니메이션 시작 ---
+        self.last_scored   = winner
+        self.score_flash_t = SCORE_FLASH_DURATION
         self.server = winner
         if self.is_game_over():
             w = "TOP" if self.score["top"] > self.score["bottom"] else "BOTTOM"
@@ -445,7 +490,7 @@ class GameScene(Scene):
         # 플레이어 입력/AI
         self.player_bottom.swing_pressed = keys[pygame.K_SPACE]
         self.player_bottom.update(dt, self.shuttle)
-        self.player_top.update(dt, self.shuttle)
+        self.player_top.update(dt, self.shuttle, self.diff)
 
         # 셔틀 이동
         self.shuttle.update(dt)
@@ -465,6 +510,10 @@ class GameScene(Scene):
             winner_side = "bottom" if loser_side == "top" else "top"
             self.award_point(winner_side, f"Out - {loser_side.upper()}")
             return
+        # 점수 깜빡이 타이머 감소
+        if self.score_flash_t > 0:
+            self.score_flash_t = max(0.0, self.score_flash_t - dt)
+
 
     def draw(self, surf):
         surf.fill((245, 250, 255))
@@ -509,26 +558,55 @@ class GameScene(Scene):
         self.shuttle.draw(surf)
 
         # 스코어/상태 보드
-        board_rect = pygame.Rect(0, 0, WIDTH-40, 100)
-        board_rect.center = (WIDTH//2, 80)
-        pygame.draw.rect(surf, (255,255,255), board_rect, border_radius=12)
-        pygame.draw.rect(surf, (0,0,0), board_rect, width=2, border_radius=12)
+        BOARD_W, BOARD_H = 120, 60
+        margin_court = 10
 
-        score_text = f"TOP {self.score['top']}  :  {self.score['bottom']} BOTTOM"
-        server_text = f"Server: {'BOTTOM' if self.server=='bottom' else 'TOP'}"
-        time_text = ""
-        if ENABLE_TIME_LIMIT and self.round_time_left is not None:
-            time_text = f"Time: {max(0, int(self.round_time_left))}s"
+        x_left = court_rect.right + margin_court
+        y_top  = court_rect.centery - BOARD_H // 2
+        board_rect = pygame.Rect(x_left, y_top, BOARD_W, BOARD_H)
 
-        s1 = FONT_M.render(score_text, True, BLACK)
-        s2 = FONT_S.render(server_text, True, (60,60,60))
-        s3 = FONT_S.render(time_text, True, (60,60,60)) if time_text else None
+        pygame.draw.rect(surf, (255, 255, 255), board_rect, border_radius=12)
+        pygame.draw.rect(surf, (0, 0, 0), board_rect, width=2, border_radius=12)
 
-        surf.blit(s1, (board_rect.centerx - s1.get_width()//2, board_rect.top + 8))
-        surf.blit(s2, (board_rect.left + 16, board_rect.bottom - 30))
-        if s3:
-            surf.blit(s3, (board_rect.right - 16 - s3.get_width(), board_rect.bottom - 30))
+        # --- 애니메이션용 색/스케일 계산 ---
+        # t=0~1로 정규화, 앞/뒤로 부드럽게 펄스(색+스케일)
+        if self.score_flash_t > 0:
+            t = 1.0 - (self.score_flash_t / SCORE_FLASH_DURATION)  # 진행도 0→1
+            # ease-out-in 느낌
+            import math
+            ease = 0.5 - 0.5 * math.cos(math.pi * t)  # 0→1 부드럽게
 
+            # 색 보간: BLACK -> SCORE_FLASH_COLOR -> BLACK
+            def lerp(a,b,u): return int(a + (b-a)*u)
+            # 왕복 느낌: 앞 절반 up, 뒤 절반 down
+            updown = (ease if ease <= 0.5 else 1.0 - (ease-0.5)*2)
+            u = updown * 2.0 if ease <= 0.5 else (1.0 - updown) * 2.0
+            u = max(0.0, min(1.0, u))
+
+            col = tuple(lerp(0, c, u) for c in SCORE_FLASH_COLOR)
+
+            # 스케일: 1.0 -> SCORE_MAX_SCALE -> 1.0
+            scale = 1.0 + (SCORE_MAX_SCALE - 1.0) * (1.0 - abs(1.0 - 2.0*ease))
+        else:
+            col = (0, 0, 0)
+            scale = 1.0
+
+        # 점수 문자열
+        score_text = f"{self.score['top']} : {self.score['bottom']}"
+
+        # 기본 렌더 후 스케일
+        text_surface = FONT_M.render(score_text, True, col)
+        if scale != 1.0:
+            w, h = text_surface.get_size()
+            text_surface = pg_transform.smoothscale(text_surface, (w, h))
+
+
+        # 중앙 배치
+        surf.blit(
+            text_surface,
+            (board_rect.centerx - text_surface.get_width() // 2,
+            board_rect.centery - text_surface.get_height() // 2)
+        )
         # 하단 도움말
         help1 = FONT_S.render("←/→/↑/↓: 속도조절  |  Space: 서브  |  R: 랠리 리셋  |  ESC: 메뉴", True, (80,80,80))
         surf.blit(help1, (WIDTH//2 - help1.get_width()//2, HEIGHT - 36))
@@ -539,7 +617,10 @@ class GameScene(Scene):
                 self.go_to_menu()
             elif event.key == pygame.K_r:
                 self.reset_serve(keep_server=True)
-
+            elif event.key in (pygame.K_F1, pygame.K_F2, pygame.K_F3):
+                self.diff_mode = "easy" if event.key == pygame.K_F1 else ("normal" if event.key == pygame.K_F2 else "hard")
+                self.diff = DIFFICULTY[self.diff_mode]
+                self.info.set_text(f"난이도 변경: {self.diff_mode.upper()}")
 
 # =========================================================
 # 5.5 GameOverScene
