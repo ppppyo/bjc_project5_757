@@ -47,11 +47,16 @@ POWER_HIT_BONUS = 180.0    # 파워 스윙 보너스 속도(Space)
 
 MIN_VY_AFTER_HIT = 320.0   # 타격 후 최소 수직 속도(상대편으로 확실히 넘어가도록)
 CROSS_NUDGE_PX   = 14.0    # 타격 후 새 속도 방향으로 살짝 밀어내는 거리(겹침 방지)
+COURT_OUTER_LINE_W = 6  # 바깥 라인 두께(draw의 MAIN_LINE_W와 같게 유지)
 
 # 점수 애니메이션
 SCORE_FLASH_DURATION = 0.45   # 깜빡임 총 시간(초)
 SCORE_MAX_SCALE      = 1.25   # 글자 최대 확대 배율
 SCORE_FLASH_COLOR    = (30, 144, 255)  # 하이라이트 색
+
+# === 키 매핑 ===
+KEY_SERVE = pygame.K_RETURN   # Enter로 서브
+KEY_SMASH = pygame.K_SPACE    # Space는 스매시 전용
 
 DIFFICULTY = {
     "easy":   {"speed_scale": 0.6, "aim_error": 50, "predict": 0.10, "swing_prob": 0.55},
@@ -260,7 +265,7 @@ class MenuScene(Scene):
         self.quit_btn.draw(surf)
 
         guide = [
-            "조작: ←/→/↑/↓ 속도 조절, Space 서브, R 랠리리셋, ESC 메뉴",
+            "조작: ←/→/↑/↓ 이동, Enter=서브, Space 스매시, R 랠리리셋, ESC 메뉴",
             f"목표 점수: {TARGET_SCORE} / 2점 차 규칙: {'ON' if TWO_POINT_RULE else 'OFF'} / 라운드 제한: {'무제한' if not ENABLE_TIME_LIMIT or ROUND_TIME<=0 else str(ROUND_TIME)+'초'}",
         ]
         for i, line in enumerate(guide):
@@ -286,8 +291,8 @@ class HowToScene(Scene):
         # 안내 텍스트 (원하는 대로 수정 가능)
         self.lines = [
             "방향키 ←/→/↑/↓ : 좌/우/앞/뒤 플레이어 이동",
-            "Enter         : 스매시 (리시브의 1.5~2배 속도)",
-            "Space         : 리시브",
+            "Enter         : 서브 시작",
+            "Space         : 스매시 (리시브의 1.5~2배 속도)",
             "",
             "서브 규칙:",
             "- 득점자가 다음 서브를 함",
@@ -336,26 +341,33 @@ class GameScene(Scene):
         self.go_to_gameover = go_to_gameover
         self.info = Label("", center=(WIDTH//2, 40), font=FONT_M)
         self.last_hitter = None  # 마지막으로 친 쪽("top"/"bottom"), 연속 타격 방지/제어 용
+        self.ai_serve_timer = 0.0
 
         # 셔틀 상태(데모)
         self.shuttle_pos = [WIDTH//2, HEIGHT//2]
         self.vel = [200, 120]
         self.radius = 10
 
-         # --- 사운드 로드 ---
-        try:
-            # 업로드한 파일 경로에 맞춰주세요.
-            self.snd_receive = pygame.mixer.Sound("C:/Users/basra/OneDrive/바탕 화면/Gist/BJC/Python Programbadminton-83559.mp3")          # 리시브
-            self.snd_smash   = pygame.mixer.Sound("C:/Users/basra/OneDrive/바탕 화면/Gist/BJC/Python Program/table-smash-47690.mp3")        # 스매시
-            self.snd_lose    = pygame.mixer.Sound("C:/Users/basra/OneDrive/바탕 화면/Gist/BJC/Python Program/cartoon-fail-trumpet-278822.mp3")  # 패배
-        except Exception as e:
-            print("[sound] load error:", e)
-            self.snd_receive = self.snd_smash = self.snd_lose = None
+        # --- 사운드 로드 ---
+        def _load_sound(candidates):
+            for path in candidates:
+                try:
+                    return pygame.mixer.Sound(path)
+                except Exception:
+                    pass
+            return None  # 실패 시 None
 
-        # 볼륨 튜닝(원하면 조정)
+        # 업로드된 파일(/mnt/data) 우선, 같은 폴더 파일명 후순위
+        self.snd_receive = pygame.mixer.Sound("C:/Users/basra/OneDrive/바탕 화면/Gist/BJC/Python Program/badminton-83559.mp3")
+        self.snd_smash = pygame.mixer.Sound("C:/Users/basra/OneDrive/바탕 화면/Gist/BJC/Python Program/table-smash-47690.mp3")
+        self.snd_fail = pygame.mixer.Sound("C:/Users/basra/OneDrive/바탕 화면/Gist/BJC/Python Program/cartoon-fail-trumpet-278822.mp3")
+        self.snd_win = pygame.mixer.Sound("C:/Users/basra/OneDrive/바탕 화면/Gist/BJC/Python Program/you-win-sequence-1-183948.mp3")
+
+        # 볼륨 (원하면 수치 조정)
         if self.snd_receive: self.snd_receive.set_volume(0.75)
         if self.snd_smash:   self.snd_smash.set_volume(0.85)
-        if self.snd_lose:    self.snd_lose.set_volume(0.8)
+        if self.snd_fail:    self.snd_fail.set_volume(0.85)
+        if self.snd_win:     self.snd_win.set_volume(0.90)
 
         # ===== 코트 기하 =====
         self.COURT_H = 780
@@ -388,31 +400,111 @@ class GameScene(Scene):
 
         self.reset_serve(keep_server=True)
 
-    # --- 재생 헬퍼 ---
+    # --- 사운드 헬퍼 ---
     def play_receive(self):
-        if self.snd_receive: self.snd_receive.play()
+        if getattr(self, "snd_receive", None): self.snd_receive.play()
 
     def play_smash(self):
-        if self.snd_smash: self.snd_smash.play()
+        if getattr(self, "snd_smash", None): self.snd_smash.play()
 
-    def play_lose(self):
-        if self.snd_lose: self.snd_lose.play()
+    def play_fail(self):
+        if getattr(self, "snd_fail", None): self.snd_fail.play()
+
+    def play_win(self):
+        if getattr(self, "snd_win", None): self.snd_win.play()
+
+    
+    # --- 코트 하프(Rect) 도우미 ---
+    def half_rect_for(self, side: str) -> pygame.Rect:
+        r = self.court_rect.copy()
+        r.height //= 2
+        if side == "bottom":
+            r.top = self.cy
+        # side == "top"이면 위 하프 그대로
+        return r
+
+    # --- 서비스 지점 계산 ---
+    # rule: 자신의 점수가 짝수면 '오른쪽', 홀수면 '왼쪽' (서버 '본인 기준'의 좌/우)
+    # top은 화면 아래를 바라보므로 '본인 기준 오른쪽' == 화면 왼쪽, bottom은 화면 위를 바라봐서 오른쪽==화면 오른쪽.
+    def serve_spot(self, side: str) -> tuple[int, int]:
+        even = (self.score[side] % 2 == 0)
+        which = "right" if even else "left"
+        return self.side_spot(side, which)
+
+    
+        # --- 한쪽 면의 '오른쪽/왼쪽' 서비스 지점 (그 쪽 선수의 시점 기준) ---
+    def side_spot(self, side: str, which: str) -> tuple[int, int]:
+        """
+        side: 'top' 또는 'bottom'
+        which: 'right' 또는 'left'  (해당 side 선수의 '오른쪽/왼쪽' 개념)
+        """
+        half = self.half_rect_for(side)
+        x_offset = int(half.width * 0.25)
+
+        if side == "bottom":
+            # bottom의 '오른쪽' = 화면 오른쪽
+            x = half.centerx + (x_offset if which == "right" else -x_offset)
+            y = int(half.bottom - half.height * 0.20)
+        else:
+            # top의 '오른쪽' = 화면 왼쪽 (시점 반대)
+            x = half.centerx - (x_offset if which == "right" else -x_offset)
+            y = int(half.top + half.height * 0.20)
+        return x, y
+
+    # --- (server 기준) 리시브 시작 지점: 대각 서비스 코트 ---
+    def receive_spot(self, server_side: str) -> tuple[int, int]:
+        """
+        server_side의 현재 점수 짝/홀을 기준으로,
+        상대는 '대각선' 서비스 코트에서 시작.
+        => server가 오른쪽에서 서브면, 상대도 자신의 '오른쪽' 서비스 박스에서 대기
+        """
+        opponent = "top" if server_side == "bottom" else "bottom"
+        even = (self.score[server_side] % 2 == 0)
+        which = "right" if even else "left"
+        return self.side_spot(opponent, which)
+
 
     # ------------ 유틸 ------------
     def place_for_serve(self):
-        # 서버 옆에서 살짝 뒤쪽 위치에 셔틀 배치
+        # 서버/리시버 시작 위치 계산
+        sx, sy = self.serve_spot(self.server)              # 서버 위치
+        rx, ry = self.receive_spot(self.server)            # 리시버(대각) 위치
+
+        server_player   = self.player_bottom if self.server == "bottom" else self.player_top
+        receiver_player = self.player_top    if self.server == "bottom" else self.player_bottom
+
+        # 플레이어들을 해당 위치로 배치
+        server_player.pos[0], server_player.pos[1]   = sx, sy
+        receiver_player.pos[0], receiver_player.pos[1] = rx, ry
+
+        # 셔틀은 서버 바로 '앞'에 배치 (겹침 방지 위해 약간 오프셋)
         if self.server == "bottom":
-            self.shuttle.pos = [self.player_bottom.pos[0], self.player_bottom.pos[1] - 40]
+            self.shuttle.pos = [sx, sy - 36]  # 아래쪽 서버는 위쪽으로 36px
         else:
-            self.shuttle.pos = [self.player_top.pos[0], self.player_top.pos[1] + 40]
+            self.shuttle.pos = [sx, sy + 36]  # 위쪽 서버는 아래쪽으로 36px
         self.shuttle.vel = [0.0, 0.0]
+
 
     def reset_serve(self, keep_server=False):
         self.rally_active = False
         self.place_for_serve()
         if ENABLE_TIME_LIMIT and ROUND_TIME>0:
             self.round_time_left = float(ROUND_TIME)
-        self.info.set_text(f"서브 대기: {self.server.upper()} - Space로 시작")
+
+        # 🟢 추가: 랠리 시작 전 상태 초기화
+        self.last_hitter = None
+        self.player_bottom.swing_pressed = False
+        self.player_top.swing_pressed = False
+        self.player_bottom.last_hit_time = -999.0
+        self.player_top.last_hit_time = -999.0
+
+        # 안내 + AI 자동 서브 타이머
+        if self.server == "bottom":
+            self.info.set_text("서브 대기: BOTTOM – Enter로 시작")
+            self.ai_serve_timer = 0.0
+        else:
+            self.info.set_text("서브 대기: TOP – AI가 곧 서브")
+            self.ai_serve_timer = 0.6   # AI가 서버면 0.6초 후 자동 서브
 
     def start_rally(self):
         self.rally_active = True
@@ -421,12 +513,22 @@ class GameScene(Scene):
         self.shuttle.vel = [0.0, -speed] if self.server == "bottom" else [0.0, speed]
         self.info.set_text("랠리 진행 중")
 
+        # 🟢 추가: 서버가 첫 타자
+        self.last_hitter = self.server
+
     def side_of_y(self, y):
         return "top" if y < self.cy else "bottom"
 
     def award_point(self, winner, reason):
-        self.play_lose()
         self.score[winner] += 1
+        # 플레이어(bottom) 기준 승/패 사운드
+        if winner == "bottom":
+            self.play_win()
+        else:
+            self.play_fail()
+        # --- 점수 애니메이션 시작 ---
+        self.last_scored   = winner
+        self.score_flash_t = SCORE_FLASH_DURATION
         self.server = winner
         if self.is_game_over():
             w = "TOP" if self.score["top"] > self.score["bottom"] else "BOTTOM"
@@ -449,55 +551,65 @@ class GameScene(Scene):
         
     # ------------ 충돌/타격 ------------
     def try_hit(self, player, now):
-        # 사람: Space 눌렀을 때만 스윙, AI: 자동 스윙 플래그
-        if player.is_human and not player.swing_pressed:
-            return
 
         # 같은 편이 연속으로 치는 것 잠깐 금지(셔틀이 아직 자기 하프에 있으면)
         if self.last_hitter == player.side and self.side_of_y(self.shuttle.pos[1]) == player.side:
             return
 
+        # 기본 충돌 가능 체크(쿨다운/반경/하프)
         if not player.can_hit(now, self.shuttle):
             return
 
-        import math
+        # === 리시브/스매시 판단 ===
+        # 사람: 스페이스 누르면 스매시, 아니면 자동 리시브
+        # AI: update_ai에서 swing_pressed 결정(스매시 확률/상황), 아니면 자동 리시브
+        is_smash = player.swing_pressed
 
-        # 상대편 기본 목표 x (상대 위치로 살짝 유도)
+        # 목표 x: 상대 위치를 살짝 겨냥(너무 정확하지 않게 살짝만 보정)
         opponent = self.player_top if player.side == "bottom" else self.player_bottom
         target_x = opponent.pos[0]
-
-        # 스윙 파워
-        power = BASE_HIT_SPEED + (POWER_HIT_BONUS if player.is_human and player.swing_pressed else 0.0)
-
-        # x 방향은 상대의 x 쪽으로 제한된 비율로 유도
         nx = max(-1.0, min(1.0, (target_x - self.shuttle.pos[0]) / 120.0))
-        vx = power * 0.6 * nx
 
-        # y 방향은 반드시 '상대편'으로
+        # 파워
+        power = BASE_HIT_SPEED + (POWER_HIT_BONUS if is_smash else 0.0)
+
+        # 반대 코트로 보냄
         vy_sign = -1.0 if player.side == "bottom" else 1.0
+        vx = power * 0.6 * nx
         vy = power * vy_sign
 
-        # 최소 수직 속도 보장(상대편으로 확실히 넘어가게)
-        if abs(vy) < MIN_VY_AFTER_HIT:
-            vy = MIN_VY_AFTER_HIT * vy_sign
+        # 최소 수직 속도 보장(네트 넘어가게)
+        try:
+            MIN_VY = MIN_VY_AFTER_HIT
+        except NameError:
+            MIN_VY = 320.0  # 상수 안 쓰셨다면 기본값
+        if abs(vy) < MIN_VY:
+            vy = MIN_VY * vy_sign
 
-        # 새 속도 적용
+        # 속도 적용
         self.shuttle.vel = [vx, vy]
 
-        # 겹침/재히트 방지를 위해 새 속도 방향으로 살짝 밀어줌
+        # 약간 앞으로 밀어 겹침/재히트 방지
+        import math
         speed = math.hypot(vx, vy)
+        try:
+            NUDGE = CROSS_NUDGE_PX
+        except NameError:
+            NUDGE = 14.0
         if speed > 1e-6:
-            self.shuttle.pos[0] += (vx / speed) * CROSS_NUDGE_PX
-            self.shuttle.pos[1] += (vy / speed) * CROSS_NUDGE_PX
+            self.shuttle.pos[0] += (vx / speed) * NUDGE
+            self.shuttle.pos[1] += (vy / speed) * NUDGE
 
-        # 상태 업데이트
+        # 상태 갱신
         player.last_hit_time = now
         self.last_hitter = player.side
 
-        if player.is_human and player.swing_pressed:
-          self.play_smash()     # 스매시
+        # 타구 사운드
+        if is_smash:
+            self.play_smash()
         else:
-          self.play_receive()   # 일반 리시브
+            self.play_receive()
+
 
     def update(self, dt):
         now = pygame.time.get_ticks() / 1000.0
@@ -505,29 +617,43 @@ class GameScene(Scene):
 
         keys = pygame.key.get_pressed()
 
-        # 서브 대기 중 Space 로 랠리 시작
+        # ─ 서브 대기 상태 ─
         if not self.rally_active:
-            if keys[pygame.K_SPACE]:
-                self.start_rally()
-            # 서브 대기 중에는 속도 조절 무시, 위치만 표시
+            # AI가 서버면 자동 서브 타이머
+            if self.server == "top":
+                if self.ai_serve_timer > 0:
+                    self.ai_serve_timer -= dt
+                    if self.ai_serve_timer <= 0:
+                        self.start_rally()
             return
+        
+        # 리시브: 셔틀콕이 플레이어 근처에 오면 자동 리시브
+        if self.rally_active:
+            # 플레이어와 셔틀 간 거리 계산 (리시브 범위: RACKET_RADIUS + 20px)
+            distance_to_shuttle = abs(self.shuttle.pos[0] - self.player_bottom.pos[0]) + abs(self.shuttle.pos[1] - self.player_bottom.pos[1])
+            
+            # 리시브 범위 내에 있으면 자동 리시브
+            if distance_to_shuttle < RACKET_RADIUS + 20:
+                self.shuttle.vel[0] *= 1  # 속도 유지 (리시브 후 속도 변경 없음)
+                self.shuttle.vel[1] *= 1  # 속도 유지 (리시브 후 속도 변경 없음)
+                # 리시브 후 랠리는 계속 진행
+                self.rally_active = True
 
-        # 남은 시간 처리
-        if ENABLE_TIME_LIMIT and self.round_time_left is not None:
-            self.round_time_left -= dt
-            if self.round_time_left <= 0:
-                # 시간 초과: 상대 득점
-                loser = self.side_of_y(self.shuttle_pos[1])  # 셔틀이 있는 쪽이 실격
-                winner = "bottom" if loser == "top" else "top"
-                self.award_point(winner, "Time over")
-                return
-        # 플레이어 입력/AI
-        self.player_bottom.swing_pressed = keys[pygame.K_SPACE]
-        self.player_bottom.update(dt, self.shuttle)
-        self.player_top.update(dt, self.shuttle)
+        # 스매시: 스페이스 키 눌렀을 때
+        if self.rally_active:
+            if keys[pygame.K_SPACE]:  # 스페이스 키로 스매시
+                self.shuttle.vel[0] *= 2  # x축 속도 두 배
+                self.shuttle.vel[1] *= 2  # y축 속도 두 배
+                self.rally_active = True  # 스매시 후에도 랠리 계속
 
         # 셔틀 이동
         self.shuttle.update(dt)
+
+        # 플레이어 입력/AI
+        self.player_bottom.swing_pressed = keys[pygame.K_SPACE]
+
+        self.player_bottom.update(dt, self.shuttle, self.diff)
+        self.player_top.update(dt, self.shuttle, self.diff)
 
         # 라켓 타격 판정(먼저 상대 쪽, 동시에 두 번 치는 걸 줄이기 위해 순서)
         if self.side_of_y(self.shuttle.pos[1]) == "bottom":
@@ -537,13 +663,41 @@ class GameScene(Scene):
             self.try_hit(self.player_top, now)
             self.try_hit(self.player_bottom, now)
 
-        # 아웃 판정
+        # ---- 간단판 OUT/LINE 판정 ----
+        # 규칙:
+        # - 좌/우 사이드: 선에 닿거나(라인 밴드) 밖으로 나가면 → 마지막 타자의 '상대' 득점
+        # - 위/아래 베이스: '밖으로 넘어가면'만 → 못 친 쪽(= 마지막 타자의 상대) 패 → 마지막 타자 득점
         r = self.shuttle.radius
-        if not self.court_rect.inflate(-r*2, -r*2).collidepoint(self.shuttle.pos[0], self.shuttle.pos[1]):
-            loser_side = self.side_of_y(self.shuttle.pos[1])
-            winner_side = "bottom" if loser_side == "top" else "top"
-            self.award_point(winner_side, f"Out - {loser_side.upper()}")
+        cx, cy = self.shuttle.pos
+        outer = self.court_rect
+        line_w = COURT_OUTER_LINE_W if 'COURT_OUTER_LINE_W' in globals() else 6
+
+        # 1) 바깥으로 '넘어감'
+        if cx < outer.left or cx > outer.right or cy < outer.top or cy > outer.bottom:
+            # 1-a) 좌/우로 나감 → 사이드 아웃: 마지막 타자의 '상대' 득점
+            if cx < outer.left or cx > outer.right:
+                hitter = self.last_hitter or self.server
+                winner = "top" if hitter == "bottom" else "bottom"
+                self.award_point(winner, "Side out")
+                return
+            # 1-b) 위/아래로 나감 → 베이스 아웃: 마지막 타자 득점(= 수신측 패)
+            hitter = self.last_hitter or self.server
+            self.award_point(hitter, "Baseline out")
             return
+
+        # 2) 코트 안이지만 '사이드 라인 밴드'에 닿음 (베이스 라인 접촉은 인으로 취급)
+        on_left_side_line  = (outer.left <= cx <= outer.left + line_w)
+        on_right_side_line = (outer.right - line_w <= cx <= outer.right)
+        if on_left_side_line or on_right_side_line:
+            hitter = self.last_hitter or self.server
+            winner = "top" if hitter == "bottom" else "bottom"
+            self.award_point(winner, "Side line")
+            return
+        # 점수 깜빡이 타이머 감소
+        if self.score_flash_t > 0:
+            self.score_flash_t = max(0.0, self.score_flash_t - dt)
+
+
 
     def draw(self, surf):
         surf.fill((245, 250, 255))
@@ -587,7 +741,7 @@ class GameScene(Scene):
         self.player_bottom.draw(surf)
         self.shuttle.draw(surf)
 
-         # 스코어/상태 보드
+        # 스코어/상태 보드
         BOARD_W, BOARD_H = 120, 60
         margin_court = 10
 
@@ -637,9 +791,8 @@ class GameScene(Scene):
             (board_rect.centerx - text_surface.get_width() // 2,
             board_rect.centery - text_surface.get_height() // 2)
         )
-
         # 하단 도움말
-        help1 = FONT_S.render("←/→/↑/↓: 속도조절  |  Space: 서브  |  R: 랠리 리셋  |  ESC: 메뉴", True, (80,80,80))
+        help1 = FONT_S.render("←/→/↑/↓: 속도조절  | Enter=서브 |  Space: 스매시  |  R: 랠리 리셋  |  ESC: 메뉴", True, (80,80,80))
         surf.blit(help1, (WIDTH//2 - help1.get_width()//2, HEIGHT - 36))
 
     def handle_event(self, event):
@@ -648,11 +801,8 @@ class GameScene(Scene):
                 self.go_to_menu()
             elif event.key == pygame.K_r:
                 self.reset_serve(keep_server=True)
-            elif event.key in (pygame.K_F1, pygame.K_F2, pygame.K_F3):
-                self.diff_mode = "easy" if event.key == pygame.K_F1 else ("normal" if event.key == pygame.K_F2 else "hard")
-                self.diff = DIFFICULTY[self.diff_mode]
-                self.info.set_text(f"난이도 변경: {self.diff_mode.upper()}")
-
+            elif (event.key == KEY_SERVE) and (not self.rally_active) and (self.server == "bottom"):
+                self.start_rally()
 
 # =========================================================
 # 5.5 GameOverScene
