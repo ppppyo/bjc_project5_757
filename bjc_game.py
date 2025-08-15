@@ -3,6 +3,7 @@ import sys
 from pygame import transform as pg_transform
 import math
 import random
+
 # =========================================================
 # 1. 기본 설정 & 전역 상수
 # =========================================================
@@ -23,14 +24,14 @@ PRIMARY = (30, 144, 255)
 RED = (220, 40, 40)
 GREEN = (40, 160, 60)
 
-FONT_L = pygame.font.SysFont("malgungothic", 48)  # 한글 폰트(윈도우 기준)
-FONT_M = pygame.font.SysFont("malgungothic", 28)
-FONT_S = pygame.font.SysFont("malgungothic", 22)
+FONT_L = pygame.font.SysFont("malgungothic", 45)  # 한글 폰트(윈도우 기준)
+FONT_M = pygame.font.SysFont("malgungothic", 25)
+FONT_S = pygame.font.SysFont("malgungothic", 18)
 
 # === 규칙 상수 (섹션 1 아래에 추가) ===
 ENABLE_TIME_LIMIT = True   # 시간 제한 사용 여부
 ROUND_TIME        = 60     # 라운드 시간(초). 0이면 무제한
-TARGET_SCORE      = 21      # 목표 점수
+TARGET_SCORE      = 21     # 목표 점수
 TWO_POINT_RULE    = False  # 2점 차 규칙 사용 여부
 
 # === 물리/조작 상수 ===
@@ -245,9 +246,9 @@ class Shuttle:
 class MenuScene(Scene):
     def __init__(self, go_to_game, go_to_howto):
         self.title = Label("TEAM BJC - Badminton Junkies Crew", center=(WIDTH//2, 120))
-        self.start_btn = Button("게임 시작", center=(WIDTH//2, 300))
-        self.howto_btn = Button("조작법", center=(WIDTH//2, 380))
-        self.quit_btn  = Button("종료", center=(WIDTH//2, 460))
+        self.start_btn = Button("Game Start", center=(WIDTH//2, 300))
+        self.howto_btn = Button("How to Operate", center=(WIDTH//2, 380))
+        self.quit_btn  = Button("Game Over", center=(WIDTH//2, 460))
         self.go_to_game = go_to_game
         self.go_to_howto = go_to_howto
 
@@ -265,8 +266,8 @@ class MenuScene(Scene):
         self.quit_btn.draw(surf)
 
         guide = [
-            "조작: ←/→/↑/↓ 이동, Enter=서브, Space 스매시, R 랠리리셋, ESC 메뉴",
-            f"목표 점수: {TARGET_SCORE} / 2점 차 규칙: {'ON' if TWO_POINT_RULE else 'OFF'} / 라운드 제한: {'무제한' if not ENABLE_TIME_LIMIT or ROUND_TIME<=0 else str(ROUND_TIME)+'초'}",
+            "Controls ←/→/↑/↓ : Move, Enter = Serve, Space = Smash, ESC = Menu",
+            f"Target Score : {TARGET_SCORE} / Two-Point Rule : {'ON' if TWO_POINT_RULE else 'OFF'}",
         ]
         for i, line in enumerate(guide):
             gsurf = FONT_S.render(line, True, (70,70,70))
@@ -285,19 +286,18 @@ class HowToScene(Scene):
     """조작법/규칙 안내 씬"""
     def __init__(self, go_back_menu):
         self.go_back_menu = go_back_menu
-        self.title = Label("조작법 안내", center=(WIDTH//2, 90))
-        self.back_btn = Button("뒤로", center=(WIDTH//2, HEIGHT-80), size=(160, 56))
+        self.title = Label("Instructions for operation", center=(WIDTH//2, 90))
+        self.back_btn = Button("Back", center=(WIDTH//2, HEIGHT-80), size=(160, 56))
 
         # 안내 텍스트 (원하는 대로 수정 가능)
         self.lines = [
-            "방향키 ←/→/↑/↓ : 좌/우/앞/뒤 플레이어 이동",
-            "Enter         : 서브 시작",
-            "Space         : 스매시 (리시브의 1.5~2배 속도)",
+            "Arrow keys ←/→/↑/↓ : Move left/right/forward/back",
+            "Enter              : Start serve",
+            "Space              : Smash (1.5~2x the speed of a receive)",
             "",
-            "서브 규칙:",
-            "- 득점자가 다음 서브를 함",
-            "- 자신의 점수 홀수 = 왼쪽, 짝수 = 오른쪽에서 서브",
-            "- 서브는 자기 코트에서 대각 서비스 박스로"
+            "Serve rules:",
+            "- The player who scores serves next",
+            "- Odd score: serve from the left; even score: serve from the right",
         ]
         # 미리 렌더
         self.text_surfs = [FONT_S.render(t, True, (40,40,40)) for t in self.lines]
@@ -396,7 +396,7 @@ class GameScene(Scene):
         # ==== 난이도 ====
         self.diff_mode = "normal"          # "easy" / "normal" / "hard"
         self.diff      = DIFFICULTY[self.diff_mode]
-        self.info.set_text(f"난이도: {self.diff_mode.upper()}  |  Space 서브")
+        self.info.set_text(f"Difficulty: {self.diff_mode.upper()}  |  Space serve")
 
         self.reset_serve(keep_server=True)
 
@@ -500,10 +500,10 @@ class GameScene(Scene):
 
         # 안내 + AI 자동 서브 타이머
         if self.server == "bottom":
-            self.info.set_text("서브 대기: BOTTOM – Enter로 시작")
+            self.info.set_text("Wait for the serve : BOTTOM – Press Enter to start")
             self.ai_serve_timer = 0.0
         else:
-            self.info.set_text("서브 대기: TOP – AI가 곧 서브")
+            self.info.set_text("Wait for the serve : TOP – AI will serve soon")
             self.ai_serve_timer = 0.6   # AI가 서버면 0.6초 후 자동 서브
 
     def start_rally(self):
@@ -511,7 +511,7 @@ class GameScene(Scene):
         speed = BASE_HIT_SPEED + 80
         # 서버가 위/아래에 따라 초기 방향
         self.shuttle.vel = [0.0, -speed] if self.server == "bottom" else [0.0, speed]
-        self.info.set_text("랠리 진행 중")
+        self.info.set_text("Rally in progress")
 
         # 🟢 추가: 서버가 첫 타자
         self.last_hitter = self.server
@@ -793,7 +793,7 @@ class GameScene(Scene):
             board_rect.centery - text_surface.get_height() // 2)
         )
         # 하단 도움말
-        help1 = FONT_S.render("←/→/↑/↓: 속도조절  | Enter=서브 |  Space: 스매시  |  R: 랠리 리셋  |  ESC: 메뉴", True, (80,80,80))
+        help1 = FONT_S.render("←/→/↑/↓ : Adjust movement | Enter : Serve | Space : Smash | ESC : Menu", True, (80,80,80))
         surf.blit(help1, (WIDTH//2 - help1.get_width()//2, HEIGHT - 36))
 
     def handle_event(self, event):
@@ -813,8 +813,8 @@ class GameOverScene(Scene):
         self.title = Label("GAME OVER", center=(WIDTH//2, 120))
         detail = f"Reason: {reason} | Winner: {winner} | TOP {score['top']} : {score['bottom']} BOTTOM"
         self.detail = Label(detail, center=(WIDTH//2, 180), font=FONT_M)
-        self.menu_btn = Button("메뉴로", center=(WIDTH//2 - 150, 320))
-        self.retry_btn = Button("다시하기", center=(WIDTH//2 + 150, 320))
+        self.menu_btn = Button("Back to Menu", center=(WIDTH//2 - 150, 320))
+        self.retry_btn = Button("Retry", center=(WIDTH//2 + 150, 320))
         self.go_to_menu = go_to_menu
         self.go_to_game = go_to_game
 
