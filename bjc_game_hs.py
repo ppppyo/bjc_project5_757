@@ -540,10 +540,6 @@ class GameScene(Scene):
         self.player_bottom.update(dt, self.shuttle, self.diff)
         self.player_top.update(dt, self.shuttle, self.diff)
 
-        # 🟢 추가: 네트를 넘겼으면 연속타격 금지 해제
-        if self.last_hitter and self.side_of_y(self.shuttle.pos[1]) != self.last_hitter:
-            self.last_hitter = None
-
         # 라켓 타격 판정(먼저 상대 쪽, 동시에 두 번 치는 걸 줄이기 위해 순서)
         if self.side_of_y(self.shuttle.pos[1]) == "bottom":
             self.try_hit(self.player_bottom, now)
@@ -552,36 +548,36 @@ class GameScene(Scene):
             self.try_hit(self.player_top, now)
             self.try_hit(self.player_bottom, now)
 
-        # 아웃 판정
-       # ---- 아웃/라인 판정: 라인 포함 시 '마지막 타자'의 상대에게 점수 ----
+        # ---- 간단판 OUT/LINE 판정 ----
+        # 규칙:
+        # - 좌/우 사이드: 선에 닿거나(라인 밴드) 밖으로 나가면 → 마지막 타자의 '상대' 득점
+        # - 위/아래 베이스: '밖으로 넘어가면'만 → 못 친 쪽(= 마지막 타자의 상대) 패 → 마지막 타자 득점
         r = self.shuttle.radius
         cx, cy = self.shuttle.pos
+        outer = self.court_rect
+        line_w = COURT_OUTER_LINE_W if 'COURT_OUTER_LINE_W' in globals() else 6
 
-        # 셔틀 중심이 "코트 박스"(반지름 여유 포함) 안에 있는지
-        outer_ok = self.court_rect.inflate(-r*2, -r*2).collidepoint(cx, cy)
-
-        # 바깥 라인 두께만큼 안쪽을 '인코트'로 간주 (= 라인 제외)
-        inner_rect = self.court_rect.inflate(-COURT_OUTER_LINE_W, -COURT_OUTER_LINE_W)
-        inner_ok = inner_rect.inflate(-r*2, -r*2).collidepoint(cx, cy)
-
-        # 바깥 라인에 '닿음' = 코트 안쪽이긴 하지만, 라인 밴드(두께) 안에 위치
-        touched_outer_line = (outer_ok and not inner_ok)
-        # 완전 바깥
-        out_beyond = (not outer_ok)
-
-        if touched_outer_line or out_beyond:
-            reason = "Outer line" if touched_outer_line else "Out"
-            # 마지막 타자의 '상대' 득점
-            if getattr(self, "last_hitter", None):
-                winner_side = "bottom" if self.last_hitter == "top" else "top"
-            else:
-                # 안전장치: last_hitter가 없다면, 셔틀이 있는 하프의 반대편에게
-                loser_side = self.side_of_y(cy)
-                winner_side = "bottom" if loser_side == "top" else "top"
-
-            self.award_point(winner_side, reason)
+        # 1) 바깥으로 '넘어감'
+        if cx < outer.left or cx > outer.right or cy < outer.top or cy > outer.bottom:
+            # 1-a) 좌/우로 나감 → 사이드 아웃: 마지막 타자의 '상대' 득점
+            if cx < outer.left or cx > outer.right:
+                hitter = self.last_hitter or self.server
+                winner = "top" if hitter == "bottom" else "bottom"
+                self.award_point(winner, "Side out")
+                return
+            # 1-b) 위/아래로 나감 → 베이스 아웃: 마지막 타자 득점(= 수신측 패)
+            hitter = self.last_hitter or self.server
+            self.award_point(hitter, "Baseline out")
             return
-        
+
+        # 2) 코트 안이지만 '사이드 라인 밴드'에 닿음 (베이스 라인 접촉은 인으로 취급)
+        on_left_side_line  = (outer.left <= cx <= outer.left + line_w)
+        on_right_side_line = (outer.right - line_w <= cx <= outer.right)
+        if on_left_side_line or on_right_side_line:
+            hitter = self.last_hitter or self.server
+            winner = "top" if hitter == "bottom" else "bottom"
+            self.award_point(winner, "Side line")
+            return
         # 점수 깜빡이 타이머 감소
         if self.score_flash_t > 0:
             self.score_flash_t = max(0.0, self.score_flash_t - dt)
