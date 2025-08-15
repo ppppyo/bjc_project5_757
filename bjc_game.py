@@ -444,12 +444,12 @@ class GameScene(Scene):
         if side == "bottom":
             # bottom의 '오른쪽' = 화면 오른쪽
             x = half.centerx + (x_offset if which == "right" else -x_offset)
-            y = int(half.bottom - half.height * 0.20)
+            y = half.centery
         else:
             # top의 '오른쪽' = 화면 왼쪽 (시점 반대)
             x = half.centerx - (x_offset if which == "right" else -x_offset)
-            y = int(half.top + half.height * 0.20)
-        return x, y
+            y = half.centery
+        return int(x), int(y)
 
     # --- (server 기준) 리시브 시작 지점: 대각 서비스 코트 ---
     def receive_spot(self, server_side: str) -> tuple[int, int]:
@@ -605,10 +605,11 @@ class GameScene(Scene):
         self.last_hitter = player.side
 
         # 타구 사운드
-        if is_smash:
-            self.play_smash()
-        else:
-            self.play_receive()
+        if player.is_human:
+            if is_smash:
+                self.play_smash()
+            else:
+                self.play_receive()
 
 
     def update(self, dt):
